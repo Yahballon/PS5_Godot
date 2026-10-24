@@ -71,7 +71,7 @@
 <details>
 <summary><b>🎯 DualSense controls</b></summary>
 
-**Pong:** Left analog stick or D-pad up/down to move the paddle; **X** starts/serves, **Circle** resets, **Options/Start** pauses or toggles the match as implemented in the [real Pong script](godot-ps5/samples/pong-smoke/main.gd).
+**Pong:** Left analog stick or D-pad up/down to move the paddle; **X** starts/serves, **Circle** resets the game, and **Options/Start** exits the sample, as implemented in the [real Pong script](godot-ps5/samples/pong-smoke/main.gd).
 
 **Platformer:** Left analog stick / D-pad left and right to move; **X** to jump.
 
