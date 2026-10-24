@@ -1,0 +1,249 @@
+name: Import verified Godot PS5 M26 and publish both sample games
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-godot-ps5.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ps5-godot-m26-public-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Install source and packaging prerequisites
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends git rsync python3 unzip zip curl ca-certificates
+
+      - name: Retrieve pinned, hardware-tested M26 port source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --quiet --depth=1 --branch test/godot-ps5-m26-platformer-acceptance \
+            https://github.com/Yahballon/tmp_lap.git /tmp/ps5-godot-src
+          # M27 changes only verification documents; the executable source
+          # is EXACTLY the v0.2.10 M26 hardware-accepted source below.
+          test "$(git -C /tmp/ps5-godot-src rev-parse HEAD)" = \
+            "44215f2302563ff7ef5dc5646c41ab32147fa02d"
+          mkdir -p godot-ps5
+          rsync -a --delete \
+            --exclude '.git/' --exclude '__pycache__/' --exclude '*.pyc' \
+            /tmp/ps5-godot-src/homebrew/godot-ps5/ godot-ps5/
+          test -s godot-ps5/native/gles3_canvas_main.cpp
+          test -s godot-ps5/engine/platform/ps5/display_server_ps5.cpp
+          test -s godot-ps5/samples/pong-smoke/main.gd
+          test -s godot-ps5/samples/m12-platformer-2201/prepare_project_navfix.py
+          test -s godot-ps5/M27_PLATFORMER_ACCEPTANCE.md
+          grep -Fq 'm26_stdout_buffer[128*1024]' godot-ps5/native/gles3_canvas_main.cpp
+          grep -Fq 'm26_stderr_buffer[128*1024]' godot-ps5/native/gles3_canvas_main.cpp
+          echo 'GODOT_PS5_M26_SOURCE_MIRRORED_PASS'
+
+      - name: Fetch official Godot 4.7.2 and original MIT Platformer sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 \
+            https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip \
+            -o /tmp/godot-4.7.2.zip
+          unzip -q /tmp/godot-4.7.2.zip -d /tmp/
+          chmod +x /tmp/Godot_v4.7.2-stable_linux.x86_64
+          git clone --quiet --filter=blob:none \
+            https://github.com/AdilDevStuff/2D-Platformer-Starter-Kit.git /tmp/godot-2d-platformer
+          git -C /tmp/godot-2d-platformer checkout --quiet a48fc994cbcb168be472df84f2e13b55d2a2792f
+          test "$(git -C /tmp/godot-2d-platformer rev-parse HEAD)" = "a48fc994cbcb168be472df84f2e13b55d2a2792f"
+          test -s /tmp/godot-2d-platformer/LICENSE
+          test -s /tmp/godot-2d-platformer/Scenes/Levels/Level_01.tscn
+          test -s /tmp/godot-2d-platformer/Scenes/Levels/Level_02.tscn
+          test -s /tmp/godot-2d-platformer/Assets/Sound/FX/jump.wav
+          test -s /tmp/godot-2d-platformer/Assets/Fonts/Star\ Choco.ttf
+          echo 'GODOT_PS5_MIT_THIRD_PARTY_SOURCE_PINNED'
+
+      - name: Make fully editable PS5 Platformer source including original assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 godot-ps5/samples/m12-platformer-2201/prepare_project_navfix.py prepare /tmp/godot-2d-platformer
+          test "$(grep -l 'navigation_enabled = false' /tmp/godot-2d-platformer/Scenes/Levels/Level_0{1,2}.tscn | wc -l)" = "2"
+          test -s /tmp/godot-2d-platformer/PS5Controls.gd
+          test -s /tmp/godot-2d-platformer/AudioManagerPS5.gd
+          test -s /tmp/godot-2d-platformer/PS5BootFast.tscn
+          mkdir -p samples/2d-platformer-ps5-source
+          rsync -a --delete --exclude '.git/' --exclude '.godot/' \
+            --exclude '*.pck' --exclude 'ps5_m12_manifest.txt' \
+            /tmp/godot-2d-platformer/ samples/2d-platformer-ps5-source/
+          test -s samples/2d-platformer-ps5-source/LICENSE
+          test -s samples/2d-platformer-ps5-source/Scenes/Levels/Level_02.tscn
+          echo 'GODOT_PS5_EDITABLE_PLATFORMER_SOURCE_READY'
+
+      - name: Generate original Pong and PS5 Platformer PCKs
+        shell: bash
+        run: |
+          set -euo pipefail
+          godot=/tmp/Godot_v4.7.2-stable_linux.x86_64
+          timeout 150 "$godot" --headless --path godot-ps5/samples/pong-smoke \
+            --script res://make_pack.gd 2>&1 | tee /tmp/godot-pong-pack.log
+          grep -Fq GODOT_PS5_PONG_PCK_WRITTEN /tmp/godot-pong-pack.log
+          test -s godot-ps5/samples/pong-smoke/pong.pck
+          timeout 150 "$godot" --headless --path /tmp/godot-2d-platformer \
+            --editor --import 2>&1 | tee /tmp/godot-platformer-import.log
+          if grep -Ei 'SCRIPT ERROR|Parse Error|ERROR:.*Failed to|Failed to load script' /tmp/godot-platformer-import.log; then
+            echo 'ERROR: original platformer editor import failed' >&2
+            exit 1
+          fi
+          python3 godot-ps5/samples/m12-platformer-2201/prepare_project_navfix.py manifest /tmp/godot-2d-platformer
+          timeout 150 "$godot" --headless --path /tmp/godot-2d-platformer \
+            --script res://pack_m12.gd 2>&1 | tee /tmp/godot-platformer-pack.log
+          grep -Fq GODOT_PS5_M12D_PCK_WRITTEN /tmp/godot-platformer-pack.log
+          test -s /tmp/godot-2d-platformer/m12d-platformer-asset2201.pck
+          timeout 150 "$godot" --headless \
+            --main-pack /tmp/godot-2d-platformer/m12d-platformer-asset2201.pck \
+            --quit-after 720 2>&1 | tee /tmp/godot-platformer-host.log
+          for marker in GODOT_PS5_M12D_NAV_DISABLED_CONFIRMED GODOT_PS5_M12_INPUT_READY GODOT_PS5_M12_SCENE_READY; do
+            grep -Fq "$marker" /tmp/godot-platformer-host.log
+          done
+          if grep -Ei 'SCRIPT ERROR|Parse Error|ERROR:.*Failed to|Failed to load script|navigation_map.is_null()' /tmp/godot-platformer-host.log; then
+            echo 'ERROR: packaged platformer failed its original Godot 4.7.2 host check' >&2
+            exit 1
+          fi
+          echo GODOT_PS5_TWO_REAL_GODOT_SAMPLE_PCKS_READY
+
+      - name: Retrieve byte-exact signed PS5 M26 release, verify hash and title
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/ps5-godot-release
+          curl -fsSL --retry 4 \
+            https://github.com/Yahballon/tmp_lap/releases/download/godot-ps5-gles3-canvas-v0.2.10/PPSA99847.zip \
+            -o /tmp/ps5-godot-release/PPSA99847.zip
+          cd /tmp/ps5-godot-release
+          printf '%s  %s\n' \
+            e5d9e2107424cc949bdaae59a6afd7e6c66be5bc15ebeab5afd564e714ffcf2e \
+            PPSA99847.zip | sha256sum -c -
+          python3 - <<'PY'
+          from pathlib import Path
+          import zipfile,json,struct
+          f=Path('/tmp/ps5-godot-release/PPSA99847.zip')
+          assert f.stat().st_size==22667133
+          with zipfile.ZipFile(f) as z:
+              assert z.testzip() is None
+              assert 'PPSA99847/eboot.bin' in z.namelist()
+              assert 'PPSA99847/assets/godot/visual-smoke.pck' in z.namelist()
+              metadata=json.loads(z.read('PPSA99847/sce_sys/param.json'))
+              assert metadata['titleId']=='PPSA99847'
+              assert metadata['contentVersion']=='01.000.021'
+              assert z.read('PPSA99847/eboot.bin')[:4]==struct.pack('<I',0x1d3d154f)
+          print('PS5_GODOT_M26_ORIGINAL_SIGNED_HARDWARE_BINARY_HASH_VERIFIED')
+          PY
+
+      - name: Package installable game ZIPs and independent PCK downloads
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import zipfile,struct
+          from pathlib import Path
+          root=Path.cwd()
+          out=Path('/tmp/ps5-godot-release')
+          pong=(root/'godot-ps5/samples/pong-smoke/pong.pck').read_bytes()
+          game=(Path('/tmp/godot-2d-platformer/m12d-platformer-asset2201.pck')).read_bytes()
+          assert len(pong)>1000 and pong[:4]==b'GDPC'
+          assert len(game)>100000 and game[:4]==b'GDPC'
+          for name,data in [('pong.pck',pong),('m12d-platformer-asset2201.pck',game)]:
+              fmt,maj,minr=struct.unpack_from('<III',data,4)
+              assert fmt in (2,3,4) and maj==4 and minr==7,(name,fmt,maj,minr)
+              (out/name).write_bytes(data)
+          with zipfile.ZipFile(out/'GodotPS5-Pong-v0.2.10.zip','w',compression=zipfile.ZIP_DEFLATED) as z:
+              z.writestr('GodotPS5/games/pong.pck',pong)
+              z.writestr('GodotPS5/launch.txt','pong.pck\n')
+              z.writestr('GodotPS5/Pong-README.txt',
+                  'PS5 Godot Pong by YAHBALLON (Godot 4.7.2).\n'
+                  'Requires Godot PS5 PPSA99847 v0.2.10 installed.\n'
+                  'Copy GodotPS5 contents into /data/GodotPS5 and restart.\n'
+                  'Delete /data/GodotPS5/launch.txt for built-in Pong.\n'
+                  'Keep M26 buffered stdout/stderr enabled for 60FPS.\n'
+                  'Source: https://github.com/Yahballon/PS5_Godot/tree/v0.2.10/godot-ps5/samples/pong-smoke\n')
+              z.writestr('GodotPS5/Pong-LICENSE.txt',(root/'godot-ps5/LICENSE').read_text())
+          # Use the original proven package helper so exact launch/config
+          # and MIT license are retained. It does not modify the engine.
+          PY
+          python3 godot-ps5/samples/m12-platformer-2201/package_platformer_navfix.py \
+            /tmp/godot-2d-platformer/m12d-platformer-asset2201.pck \
+            /tmp/godot-2d-platformer/LICENSE /tmp/ps5-godot-release
+          mv /tmp/ps5-godot-release/GodotPS5-M12d-Platformer-NAV-FIX-PS5-TEST.zip \
+             /tmp/ps5-godot-release/GodotPS5-M12d-Platformer-v0.2.10.zip
+          python3 - <<'PY'
+          import zipfile
+          from pathlib import Path
+          p=Path('/tmp/ps5-godot-release')
+          for fname,asset in [('GodotPS5-Pong-v0.2.10.zip','GodotPS5/games/pong.pck'),
+              ('GodotPS5-M12d-Platformer-v0.2.10.zip',
+               'GodotPS5/games/m12d-platformer-asset2201.pck')]:
+              with zipfile.ZipFile(p/fname) as z:
+                  assert z.testzip() is None
+                  assert asset in z.namelist()
+                  assert 'GodotPS5/launch.txt' in z.namelist()
+          print('GODOT_PS5_M26_BOTH_EXTERNAL_SAMPLES_PACKAGED_PASS')
+          PY
+
+      - name: Add pinned source and external game to PS5_Godot repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > SOURCE_PROVENANCE.md <<'EOF'
+          # Frozen release source provenance – v0.2.10
+
+          - Known-good native source: [tmp_lap M26 commit 39edf0e](https://github.com/Yahballon/tmp_lap/commit/39edf0e42adbfa367cb08a22f3eed8c19030a769).
+          - Documentation-only follow-up M27, including hardware Platformer pass: [44215f2](https://github.com/Yahballon/tmp_lap/commit/44215f2302563ff7ef5dc5646c41ab32147fa02d).
+          - Original third-party MIT-licensed 2D Platformer Starter Kit: [a48fc99](https://github.com/AdilDevStuff/2D-Platformer-Starter-Kit/tree/a48fc994cbcb168be472df84f2e13b55d2a2792f).
+          - Godot engine source pinned separately to [4.7.2-stable](https://github.com/godotengine/godot/tree/4.7.2-stable); full upstream engine is intentionally not vendored.
+          - Original signed PS5 v0.2.10 package is published byte-identical: SHA256 e5d9e2107424cc949bdaae59a6afd7e6c66be5bc15ebeab5afd564e714ffcf2e.
+          - Hardware evidence: Pong TAR #46 and original Platformer TAR #47; these are local user console log archives, not embedded in this public source release.
+          - Port has MIT and individual GPL-3.0-or-later files: retain all SPDX notices. The upstream Platformer LICENSE is MIT and is included with its source and distributable PCK ZIP.
+          EOF
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add godot-ps5 samples SOURCE_PROVENANCE.md README.md
+          if ! git diff --cached --quiet; then
+            git commit -m "release: mirror 60FPS PS5 Godot M26 source and both actual Godot sample projects"
+            git push origin HEAD:main
+          fi
+          echo "GODOT_PS5_SOURCE_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Publish v0.2.10 release with both playable sample archives
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+          if git ls-remote --exit-code --tags origin refs/tags/v0.2.10 >/dev/null; then
+            echo "Refusing to silently overwrite existing v0.2.10 tag" >&2
+            exit 1
+          fi
+          gh release create v0.2.10 \
+            /tmp/ps5-godot-release/PPSA99847.zip \
+            /tmp/ps5-godot-release/GodotPS5-Pong-v0.2.10.zip \
+            /tmp/ps5-godot-release/GodotPS5-M12d-Platformer-v0.2.10.zip \
+            /tmp/ps5-godot-release/pong.pck \
+            /tmp/ps5-godot-release/m12d-platformer-asset2201.pck \
+            --target "$(git rev-parse HEAD)" \
+            --title 'PS5 Godot v0.2.10 – Native Godot 4.7.2, verified 60FPS Pong + Platformer' \
+            --notes 'Native PS5 Godot 4.7.2 GLES3 by YAHBALLON. Hardware-confirmed on jailbroken PS5 firmware 5.10: sustained 60 FPS in Pong and the original 2D Platformer Level 1 and 2. Critical M26 fix: 128 KiB buffered stdout/stderr instead of per-frame synchronous disk writes. Includes unchanged signed PPSA99847.zip (SHA256 e5d9e2107424cc949bdaae59a6afd7e6c66be5bc15ebeab5afd564e714ffcf2e), two separately selectable game install ZIPs, raw PCKs, full PS5 port source, editable MIT upstream Platformer source with PS5 patches, Godot 4.7.2 Pong GDScript, source provenance and milestone logs. Startup hitches are possible; broad 3D support not claimed. Default engine boots Pong; copy external GodotPS5 folder to /data/GodotPS5 and restart to load Platformer. Keep M26 log mode buffered.'
+          gh release view v0.2.10 --json tagName,assets --jq '{tag:.tagName,assets:[.assets[].name]}'
+          echo 'GODOT_PS5_GITHUB_RELEASE_PUBLISHED'
