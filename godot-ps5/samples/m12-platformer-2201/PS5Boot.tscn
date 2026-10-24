@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://PS5Boot.gd" id="1_ps5_boot"]
+
+[node name="PS5Boot" type="Control"]
+script = ExtResource("1_ps5_boot")

@@ -1,0 +1,12 @@
+{
+  "name": "Godot PS5 Probe",
+  "slug": "godot-ps5",
+  "version": "0.1.0",
+  "titleId": "PPSA99842",
+  "contentId": "UP9000-PPSA99842_00-GODOTPS5PROBE000",
+  "contentVersion": "01.000.001",
+  "developer": "YAHBALLON",
+  "engineVersion": "4.7.2",
+  "engineIntegrated": false,
+  "releaseStage": "PS5 PCK Storage + Display + DualSense hardware diagnostic"
+}

@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://PS5BootFast.gd" id="1_fast"]
+
+[node name="PS5BootFast" type="Control"]
+script = ExtResource("1_fast")

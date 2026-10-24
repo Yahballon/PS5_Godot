@@ -1,0 +1,16 @@
+; Godot 4.7.2 experimental PS5 2D GPU scene fixture
+config_version=5
+
+[application]
+config/name="PS5 Godot 2D Integration"
+run/main_scene="res://main.tscn"
+
+[display]
+window/size/viewport_width=1920
+window/size/viewport_height=1080
+window/size/mode=3
+
+[rendering]
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+textures/default_filters/use_nearest_mipmap_filter=false

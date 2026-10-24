@@ -1,0 +1,15 @@
+; M10b: real Godot Control/Label + external TrueType, not native overlays
+config_version=5
+
+[application]
+config/name="PS5 M10b Native Godot UI Fonts"
+run/main_scene="res://main.tscn"
+
+[display]
+window/size/viewport_width=1920
+window/size/viewport_height=1080
+window/size/mode=3
+
+[rendering]
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

@@ -1,0 +1,17 @@
+; Godot 4.7.2 PS5 M11b2 direct-read save persistence acceptance
+config_version=5
+
+[application]
+config/name="PS5 Godot M11 Save Acceptance"
+config/use_custom_user_dir=true
+config/custom_user_dir_name="GodotPS5M11Saves"
+run/main_scene="res://main.tscn"
+
+[display]
+window/size/viewport_width=1920
+window/size/viewport_height=1080
+window/size/mode=3
+
+[rendering]
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
