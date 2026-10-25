@@ -1,6 +1,9 @@
 <div align="center">
 
 # 🎮 GODOT PS5
+<p align="center">
+  <img src="https://godotengine.org/assets/share-image.jpg">
+</p>
 
 ### The Godot Engine. Running natively on PlayStation 5 homebrew.
 
